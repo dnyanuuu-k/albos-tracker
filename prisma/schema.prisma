@@ -1,0 +1,418 @@
+// Enterprise Task Management System (ETMS) Database Schema
+// Multi-tenant SaaS architecture with role-based access control
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================================================
+// ENUMS
+// ============================================================================
+
+enum UserRole {
+  SUPER_ADMIN  // Full system access, billing, org settings
+  ADMIN        // Manage departments, employees, tasks, reports
+  DEPT_MANAGER // Manage own dept tasks, team reports
+  EMPLOYEE     // View/update own tasks, log daily updates
+}
+
+enum UserStatus {
+  ACTIVE
+  INACTIVE
+  PENDING
+  SUSPENDED
+}
+
+enum EmploymentType {
+  FULL_TIME
+  PART_TIME
+  CONTRACT
+}
+
+enum TaskStatus {
+  TO_DO
+  IN_PROGRESS
+  IN_REVIEW
+  APPROVED
+  REJECTED
+  COMPLETED
+  ON_HOLD
+  OVERDUE
+  CANCELLED
+}
+
+enum TaskPriority {
+  CRITICAL
+  HIGH
+  MEDIUM
+  LOW
+}
+
+enum RecurrenceType {
+  NONE
+  DAILY
+  WEEKLY
+  MONTHLY
+  CUSTOM
+}
+
+enum TransferStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  CANCELLED
+}
+
+enum NotificationType {
+  TASK_ASSIGNED
+  STATUS_CHANGED
+  DUE_REMINDER
+  MENTION
+  TRANSFER_INITIATED
+  TRANSFER_APPROVED
+  INVITE_SENT
+  INVITE_ACCEPTED
+  TASK_REJECTED
+  ESCALATION
+}
+
+enum AuditAction {
+  CREATE
+  UPDATE
+  DELETE
+  LOGIN
+  LOGOUT
+  INVITE
+  TRANSFER
+  APPROVE
+  REJECT
+}
+
+// ============================================================================
+// CORE MODELS
+// ============================================================================
+
+// Organization (Tenant) - Top-level entity for multi-tenancy
+model Organization {
+  id          String   @id @default(cuid())
+  name        String
+  slug        String   @unique
+  plan        String   @default("free") // free, pro, enterprise
+  ownerId     String?
+  settings    String?  @default("{}") // JSON config
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  owner          User?        @relation("OrganizationOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+  users          User[]
+  departments    Department[]
+  tasks          Task[]
+  transfers      Transfer[]
+  notifications  Notification[]
+  auditLogs      AuditLog[]
+  invitations    Invitation[]
+
+  @@index([slug])
+  @@index([ownerId])
+}
+
+// User - Employees across all organizations
+model User {
+  id               String          @id @default(cuid())
+  orgId            String
+  email            String
+  passwordHash     String?          // Nullable for invited users
+  name             String?
+  phone            String?
+  employeeId       String?         @unique
+  designation      String?
+  avatarUrl        String?
+  role             UserRole        @default(EMPLOYEE)
+  status           UserStatus      @default(PENDING)
+  deptId           String?
+  managerId        String?
+  employmentType   EmploymentType?
+  joinDate         DateTime?
+  profileComplete  Int             @default(0) // 0-100 percentage
+  settings         String?         @default("{}") // JSON config (theme, notifications, etc.)
+  lastLoginAt      DateTime?
+  loginAttempts    Int             @default(0)
+  lockedUntil      DateTime?
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+
+  // Relations
+  org            Organization   @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  department     Department?    @relation(fields: [deptId], references: [id], onDelete: SetNull)
+  manager        User?          @relation("ManagerReports", fields: [managerId], references: [id], onDelete: SetNull)
+  directReports  User[]         @relation("ManagerReports")
+  managedDept    Department?    @relation("DepartmentManager")
+  ownedOrgs      Organization[] @relation("OrganizationOwner")
+  sentInvitations Invitation[]  @relation("InvitationSender")
+
+  createdTasks      Task[]          @relation("TaskCreator")
+  assignedTasks     TaskAssignee[]
+  taskUpdates       TaskUpdate[]
+  comments          TaskComment[]
+  transfers         Transfer[]
+  notifications     Notification[]
+  auditLogs         AuditLog[]
+  initiatedTransfers Transfer[]     @relation("TransferInitiator")
+
+  @@index([orgId, email])
+  @@index([deptId])
+  @@index([managerId])
+  @@index([role, status])
+}
+
+// Department - Hierarchical structure (up to 3 levels)
+model Department {
+  id          String   @id @default(cuid())
+  orgId       String
+  name        String
+  code        String
+  description String?
+  parentId    String?  // For hierarchy (up to 3 levels)
+  managerId   String?  @unique
+  isArchived  Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  org           Organization   @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  parent        Department?    @relation("DepartmentHierarchy", fields: [parentId], references: [id], onDelete: SetNull)
+  children      Department[]   @relation("DepartmentHierarchy")
+  manager       User?          @relation("DepartmentManager", fields: [managerId], references: [id], onDelete: SetNull)
+  users         User[]
+  tasks         Task[]
+  invitations   Invitation[]
+  transfersFrom Transfer[]    @relation("SourceDepartment")
+  transfersTo   Transfer[]    @relation("TargetDepartment")
+
+  @@index([orgId])
+  @@index([parentId])
+  @@index([managerId])
+  @@unique([orgId, code])
+}
+
+// Task - Core work item
+model Task {
+  id                String          @id @default(cuid())
+  orgId             String
+  deptId            String
+  title             String
+  description       String?         // Rich text/HTML
+  priority          TaskPriority    @default(MEDIUM)
+  status            TaskStatus      @default(TO_DO)
+  dueDate           DateTime?
+  estimatedHours    Float?
+  actualHours       Float?         @default(0)
+  category          String?
+  tags              String?         // JSON array
+  recurrenceType    RecurrenceType  @default(NONE)
+  recurrenceConfig  String?         // JSON for custom recurrence
+  isRecurring       Boolean         @default(false)
+  parentTaskId      String?         // For subtasks
+  dependencies      String?         // JSON array of task IDs
+  creatorId         String
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+  completedAt       DateTime?
+  approvedAt        DateTime?
+  approvedBy        String?
+  rejectedBy        String?
+  rejectedReason    String?
+
+  // Relations
+  org           Organization    @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  department    Department      @relation(fields: [deptId], references: [id], onDelete: Cascade)
+  creator       User            @relation("TaskCreator", fields: [creatorId], references: [id], onDelete: Cascade)
+  parentTask    Task?           @relation("TaskHierarchy", fields: [parentTaskId], references: [id], onDelete: Cascade)
+  subtasks      Task[]          @relation("TaskHierarchy")
+  assignees     TaskAssignee[]
+  updates       TaskUpdate[]
+  comments      TaskComment[]
+
+  @@index([orgId, deptId])
+  @@index([status])
+  @@index([priority])
+  @@index([dueDate])
+  @@index([creatorId])
+}
+
+// TaskAssignee - Many-to-many relationship between Task and User
+model TaskAssignee {
+  id          String   @id @default(cuid())
+  taskId      String
+  userId      String
+  assignedAt  DateTime @default(now())
+  assignedBy  String?  // User ID who assigned this
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+
+  // Relations
+  task Task @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([taskId, userId])
+  @@index([taskId])
+  @@index([userId])
+}
+
+// TaskUpdate - Daily progress updates
+model TaskUpdate {
+  id          String   @id @default(cuid())
+  taskId      String
+  userId      String
+  progress    Int      @default(0) // 0-100 percentage
+  hours       Float    @default(0)
+  note        String?  // Status notes, blockers, etc.
+  blockers    String?  // JSON array of blockers
+  createdAt   DateTime @default(now())
+
+  // Relations
+  task Task @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([taskId])
+  @@index([userId])
+  @@index([createdAt])
+}
+
+// TaskComment - Threaded comments on tasks
+model TaskComment {
+  id        String   @id @default(cuid())
+  taskId    String
+  userId    String
+  content   String   // Rich text/HTML
+  mentions  String?  // JSON array of user IDs mentioned
+  reactions String?  // JSON object of emoji reactions
+  parentId  String?  // For threaded comments
+  isEdited  Boolean  @default(false)
+  editedAt  DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  task    Task          @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  user    User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  parent  TaskComment?  @relation("CommentThread", fields: [parentId], references: [id], onDelete: Cascade)
+  replies TaskComment[] @relation("CommentThread")
+
+  @@index([taskId])
+  @@index([userId])
+  @@index([parentId])
+}
+
+// Transfer - Department transfer workflow
+model Transfer {
+  id             String         @id @default(cuid())
+  orgId          String
+  userId         String
+  fromDeptId     String
+  toDeptId       String
+  status         TransferStatus @default(PENDING)
+  effectiveDate  DateTime
+  reason         String?
+  initiatedBy    String
+  approvedBy     String?
+  approvedAt     DateTime?
+  rejectedBy     String?
+  rejectedAt     DateTime?
+  rejectedReason String?
+  taskReassignments String?     // JSON mapping of task reassignments
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  // Relations
+  org        Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  user       User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  initiator  User         @relation("TransferInitiator", fields: [initiatedBy], references: [id], onDelete: Cascade)
+  fromDept   Department   @relation("SourceDepartment", fields: [fromDeptId], references: [id], onDelete: Cascade)
+  toDept     Department   @relation("TargetDepartment", fields: [toDeptId], references: [id], onDelete: Cascade)
+
+  @@index([orgId])
+  @@index([userId])
+  @@index([status])
+  @@index([effectiveDate])
+}
+
+// Notification - In-app notifications
+model Notification {
+  id         String           @id @default(cuid())
+  orgId      String
+  userId     String
+  type       NotificationType
+  title      String
+  message    String
+  refEntity  String?          // Task, Transfer, etc.
+  refId      String?          // ID of referenced entity
+  readAt     DateTime?
+  createdAt  DateTime         @default(now())
+
+  // Relations
+  org Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  user User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([orgId])
+  @@index([userId])
+  @@index([readAt])
+  @@index([createdAt])
+}
+
+// AuditLog - Immutable activity history
+model AuditLog {
+  id        String     @id @default(cuid())
+  orgId     String
+  actorId   String
+  action    AuditAction
+  entity    String     // User, Task, Department, etc.
+  entityId  String?
+  oldVal    String?    // JSON of previous state
+  newVal    String?    // JSON of new state
+  ipAddress String?
+  userAgent String?
+  createdAt DateTime   @default(now())
+
+  // Relations
+  org   Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  actor User         @relation(fields: [actorId], references: [id], onDelete: Cascade)
+
+  @@index([orgId])
+  @@index([actorId])
+  @@index([action])
+  @@index([entity])
+  @@index([createdAt])
+}
+
+// Invitation - Employee email invitations
+model Invitation {
+  id           String    @id @default(cuid())
+  orgId        String
+  email        String
+  tokenHash    String    // Hashed one-time token
+  role         UserRole  @default(EMPLOYEE)
+  deptId       String?
+  sentBy       String
+  expiresAt    DateTime
+  usedAt       DateTime?
+  acceptedBy   String?
+  createdAt    DateTime  @default(now())
+
+  // Relations
+  org       Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  department Department?  @relation(fields: [deptId], references: [id], onDelete: SetNull)
+  sender    User         @relation("InvitationSender", fields: [sentBy], references: [id], onDelete: Cascade)
+
+  @@index([orgId])
+  @@index([email])
+  @@index([tokenHash])
+  @@index([expiresAt])
+}

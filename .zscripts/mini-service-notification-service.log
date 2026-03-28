@@ -1,0 +1,20 @@
+[notification-service] Installing dependencies...
+bun install v1.3.10 (30e609e0)
+
++ @types/node@22.19.15
++ socket.io@4.8.3
+
+26 packages installed [118.00ms]
+[notific
++ @types/node@22.19.15
++ prisma@6.19.2
++ typescript@5.9.3
++ @prisma/client@6.19.2
++ jose@6.2.2
++ socket.io@4.8.3
+
+58 packages installed [2.03s]
+Failed to install 1 package
+otification-service/node_modules/jose/dist/webapi/index.js'.
+      at loadAndEvaluateModule (2:1)
+🔔 Notification service running on port 3004
