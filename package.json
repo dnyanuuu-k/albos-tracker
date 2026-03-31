@@ -5,6 +5,7 @@
   "scripts": {
     "dev": "npx next dev -p 3000",
     "build": "npx next build && npx shx cp -r .next/static .next/standalone/.next/ && npx shx cp -r public .next/standalone/",
+    "postinstall": "npx prisma generate",
     "lint": "eslint .",
     "jobs": "bun src/jobs/runner.ts",
     "db:push": "npx prisma db push",
