@@ -101,7 +101,7 @@ Stage Summary:
 ---
 
 Task ID: 1
-Agent: Z.ai Code
+Agent: Albos Code
 Task: Setup project foundation - database schema with Prisma (Organization, User, Department models)
 
 Work Log:
@@ -121,7 +121,7 @@ Stage Summary:
 ---
 
 Task ID: 2
-Agent: Z.ai Code
+Agent: Albos Code
 Task: Create authentication system - login, registration, JWT tokens, session management
 
 Work Log:
@@ -142,7 +142,7 @@ Stage Summary:
 ---
 
 Task ID: 3
-Agent: Z.ai Code
+Agent: Albos Code
 Task: Build role-based access control (RBAC) middleware and utilities
 
 Work Log:
@@ -164,7 +164,7 @@ Stage Summary:
 ---
 
 Task ID: 4
-Agent: Z.ai Code
+Agent: Albos Code
 Task: Create login page and dashboard UI
 
 Work Log:
@@ -190,7 +190,7 @@ Stage Summary:
 ---
 
 Task ID: 5
-Agent: Z.ai Code
+Agent: Albos Code
 Task: Create deployment and local running documentation
 
 Work Log:
@@ -568,7 +568,7 @@ None
 ---
 
 Task ID: Final
-Agent: Z.ai Code
+Agent: Albos Code
 Task: Complete all remaining features and finalize project
 
 Work Log:
